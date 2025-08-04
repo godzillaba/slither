@@ -13,7 +13,7 @@ class InterfaceFinder(AbstractPrinter):
     WIKI = "https://github.com/trailofbits/slither/wiki/Printer-documentation#interface-finder"
 
     def _get_pragma_version_for_item(self, item, compilation_unit):
-        """Helper function to get pragma version for any item (interface, enum, struct)"""
+        """Helper function to get pragma version for any item (interface, enum, struct, event)"""
         item_file = item.source_mapping.filename if item.source_mapping else None
         
         # Skip items from node_modules
@@ -40,6 +40,18 @@ class InterfaceFinder(AbstractPrinter):
         
         return version_range, str(file_display)
 
+    def _process_items(self, item_type, items, compilation_unit, items_found):
+        """Helper function to process a collection of items of a specific type"""
+        for item in items:
+            version_range, file_display = self._get_pragma_version_for_item(item, compilation_unit)
+            if version_range is not None:  # Skip if from node_modules
+                items_found.append({
+                    'name': item.name,
+                    'type': item_type,
+                    'version_range': version_range,
+                    'file': file_display
+                })
+
     def output(self, _filename):
         """
         _filename is not used
@@ -54,42 +66,32 @@ class InterfaceFinder(AbstractPrinter):
         items_found = []
         
         for compilation_unit in self.slither.compilation_units:
-            # Find all interfaces in this compilation unit
-            for contract in compilation_unit.contracts:
-                if contract.is_interface:
-                    version_range, file_display = self._get_pragma_version_for_item(contract, compilation_unit)
-                    if version_range is not None:  # Skip if from node_modules
-                        items_found.append({
-                            'name': contract.name,
-                            'type': 'Interface',
-                            'version_range': version_range,
-                            'file': file_display
-                        })
+            # Process contracts
+            contracts = [c for c in compilation_unit.contracts if not c.is_interface]
+            self._process_items('Contract', contracts, compilation_unit, items_found)
+
+            # Process interfaces
+            interfaces = [c for c in compilation_unit.contracts if c.is_interface]
+            self._process_items('Interface', interfaces, compilation_unit, items_found)
+
+            # Process libraries
+            libraries = [c for c in compilation_unit.contracts if c.is_library]
+            self._process_items('Library', libraries, compilation_unit, items_found)
             
-            # Find all top-level enums
-            for enum in compilation_unit.enums_top_level:
-                version_range, file_display = self._get_pragma_version_for_item(enum, compilation_unit)
-                if version_range is not None:  # Skip if from node_modules
-                    items_found.append({
-                        'name': enum.name,
-                        'type': 'Enum',
-                        'version_range': version_range,
-                        'file': file_display
-                    })
+            # Process top-level enums
+            self._process_items('Enum', compilation_unit.enums_top_level, compilation_unit, items_found)
             
-            # Find all top-level structs
-            for struct in compilation_unit.structures_top_level:
-                version_range, file_display = self._get_pragma_version_for_item(struct, compilation_unit)
-                if version_range is not None:  # Skip if from node_modules
-                    items_found.append({
-                        'name': struct.name,
-                        'type': 'Struct',
-                        'version_range': version_range,
-                        'file': file_display
-                    })
+            # Process top-level structs
+            self._process_items('Struct', compilation_unit.structures_top_level, compilation_unit, items_found)
+            
+            # Process top-level events
+            self._process_items('Event', compilation_unit.events_top_level, compilation_unit, items_found)
+
+            # Process top-level errors
+            self._process_items('Error', compilation_unit.custom_errors, compilation_unit, items_found)
         
         if not items_found:
-            txt += "No interfaces, top-level enums, or structs found in the project.\n"
+            txt += "No interfaces, top-level enums, structs, or events found in the project.\n"
         else:
             txt += f"Found {len(items_found)} item(s):\n\n"
             
@@ -105,7 +107,7 @@ class InterfaceFinder(AbstractPrinter):
                 ])
             
             txt += str(table) + "\n"
-            all_tables.append(("Interfaces, Enums & Structs", table))
+            all_tables.append(("Interfaces, Enums, Structs & Events", table))
         
         self.info(txt)
         
